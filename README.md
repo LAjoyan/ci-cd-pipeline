@@ -9,7 +9,7 @@ This project uses `uv` for lightning-fast dependency management. To set up your 
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/LeoLindqvist123/ci-cd-pipeline.git
+   git clone https://github.com/LAjoyan/ci-cd-pipeline.git
    cd ci-cd-pipeline
    ```
 2. Sync the environment and install all dependencies (including dev, data and MLflow tracking tools):
@@ -282,7 +282,39 @@ docker rm -f churn-test-service
 In `.github/workflows/ci.yml`, the `package` job runs after `evaluate`:
 1. Downloads the approved `model-<sha>` artifact.
 2. Builds the Docker image and runs `tests/smoke_test.py` against the live container.
-3. On `push` events to `main`, pushes the verified image to `ghcr.io/leolindqvist123/ci-cd-pipeline/churn-api` tagged with both `<commit-sha>` and `latest`.
+3. On successful `push` events to `main`, publishes the verified Docker image to GitHub Container Registry (GHCR), using the repository owner and name together with the commit SHA as the image tag. The image is also tagged as `latest`.
+
+## ☸️ Individual Mini-Project – Kubernetes Deployment
+
+This section documents the individual deployment of the Saldes churn prediction service to Kubernetes.
+
+### Local Environment
+
+- Kubernetes distribution: Kind
+- Cluster name: `saldes-local`
+- Kubernetes version: `v1.37.0`
+- Container runtime: Docker Desktop
+
+### Kubernetes Manifests
+
+The `k8s/` directory contains:
+
+- `deployment.yaml`: Defines the application deployment, SHA-tagged container image, resource requests and limits, and startup, readiness and liveness probes.
+- `service.yaml`: Exposes the application internally through a ClusterIP service on port 8000.
+
+### Local Deployment
+
+The Saldes churn API has been deployed to the local Kind cluster.
+
+The Docker image was built locally, tagged with a Git commit SHA and loaded into the Kind cluster.
+
+The application pod reached `Running` and `Ready` status.
+
+### CI Validation
+
+GitHub Actions includes a dedicated Kubernetes manifest validation job using Kubeconform.
+
+Changes to files in `k8s/` trigger manifest validation independently of the application testing and model training pipeline.
 
 ## 📁 Project Structure
 
@@ -294,6 +326,9 @@ ci-cd-pipeline/
 │   │       └── action.yml
 │   └── workflows/
 │       └── ci.yml
+├── k8s/
+│   ├── deployment.yaml
+│   └── service.yaml
 ├── analysis/
 │   └── seed_variance.py
 ├── data/
