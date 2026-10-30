@@ -14,10 +14,21 @@ spec:
       labels:
         app: saldes-churn
     spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: saldes-churn
-          image: saldes-churn:127e522b9eff3446de983cf0d6ed0806f7e4b159
+          image: saldes-churn:b2a5e93f86034b2547c6abbe842262cf78720afa
           imagePullPolicy: IfNotPresent
+
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           ports:
             - containerPort: 8000
           resources:
