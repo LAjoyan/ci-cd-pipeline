@@ -288,6 +288,56 @@ In `.github/workflows/ci.yml`, the `package` job runs after `evaluate`:
 
 This section documents the individual deployment of the Saldes churn prediction service to Kubernetes.
 
+### Course Cluster Deployment
+
+The Saldes Churn API was also deployed to the shared course Kubernetes cluster in a dedicated namespace.
+
+**Deployment configuration:**
+- Namespace: `lilit-ajoyan`
+- Container registry: GitHub Container Registry (GHCR)
+- Image: `ghcr.io/lajoyan/ci-cd-pipeline/churn-api`
+- Image version: Git commit SHA `b2a5e93`
+- Image platforms: `linux/amd64` and `linux/arm64`
+- Image access: Private GHCR package using a Kubernetes `imagePullSecret` (`ghcr-pull`).
+
+**Resource and deployment configuration:**
+
+The namespace has a limited memory quota. To avoid exceeding the quota during updates, the Deployment uses:
+
+- `maxSurge: 0`
+- `maxUnavailable: 1`
+
+This allows the existing Pod to be removed before its replacement is created. It may cause temporary downtime during updates.
+
+Pod security settings, resource requests and limits, and health probes are maintained in the Kubernetes Deployment manifest.
+
+**Deployment and verification:**
+
+The Deployment and Service were applied to the course namespace:
+
+```bash
+kubectl apply -n lilit-ajoyan -f k8s/deployment.yaml
+kubectl apply -n lilit-ajoyan -f k8s/service.yaml
+```
+**Deployment verification:**
+
+The deployment was successfully verified in the course cluster:
+
+- Pod status: `1/1 Running`
+- Service: Available on port `8000`
+- Health endpoint: HTTP `200 OK`
+- Prediction endpoint: HTTP `200 OK`
+
+Example prediction response:
+
+```json
+{
+  "prediction": 0,
+  "churn_probability": 0.358131
+}
+```
+Deployment screenshots are available in docs/deployment-evidence/.
+
 ### Local Environment
 
 - Kubernetes distribution: Kind
@@ -383,7 +433,8 @@ ci-cd-pipeline/
 │        ├── 02-kind-predict-success.jpg
 │        ├── 03-kind-rollout-history.jpg
 │        ├── 04-kind-rollback-v1.jpg
-│        └── 05-kind-final-v2.jpg
+│        ├── 05-kind-final-v2.jpg
+│        └── 06-course-cluster-predict-success.jpg
 ├── outputs/                                # Generated locally and in CI; gitignored
 │   ├── model.joblib
 │   ├── metrics.json
