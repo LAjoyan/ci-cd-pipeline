@@ -352,6 +352,37 @@ Both versions were successfully deployed and verified. The final deployment runs
 
 The quota-aware rolling update strategy uses `maxSurge: 0` and `maxUnavailable: 1` to avoid exceeding the namespace memory request quota.
 
+### Operations and Drift Strategy
+
+The following describes the proposed operational approach. Automated data drift monitoring and alerting are not currently implemented.
+
+**Monitoring:**
+
+- Monitor Pod readiness, restarts and resource usage using Kubernetes.
+- Use the `/health` endpoint and Kubernetes probes to check application health.
+- Monitor API errors and prediction availability.
+
+**Model Performance Monitoring:**
+
+- Evaluate model performance using ROC AUC, precision, recall and F1-score.
+- Compare new model versions against the current approved model.
+- Keep the minimum ROC AUC threshold at 0.74.
+- Block model promotion when a candidate fails the quality threshold.
+
+**Data Drift Detection:**
+
+- Validate incoming data using Pandera.
+- Compare incoming feature distributions with the training data.
+- Investigate changes in data distributions and schema violations.
+
+**Response Plan:**
+
+1. Alert when data validation or model evaluation fails.
+2. Investigate unexpected changes in incoming data.
+3. Retrain the model using validated data when appropriate.
+4. Evaluate the new candidate before deployment.
+5. Roll back to the previous SHA-tagged image if the new model performs poorly.
+
 ### Local Environment
 
 - Kubernetes distribution: Kind
