@@ -429,12 +429,6 @@ ci-cd-pipeline/
 │   ├── mlflow_ci_run.png
 │   ├── mlflow_registry_champion.png
 │   └── deployment-evidence/
-│        ├── 01-kind-v2-deployment.jpg
-│        ├── 02-kind-predict-success.jpg
-│        ├── 03-kind-rollout-history.jpg
-│        ├── 04-kind-rollback-v1.jpg
-│        ├── 05-kind-final-v2.jpg
-│        └── 06-course-cluster-predict-success.jpg
 ├── outputs/                                # Generated locally and in CI; gitignored
 │   ├── model.joblib
 │   ├── metrics.json
