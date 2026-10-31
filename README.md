@@ -338,6 +338,20 @@ Example prediction response:
 ```
 Deployment screenshots are available in docs/deployment-evidence/.
 
+**Rolling update and rollback verification:**
+
+The deployment was tested using two model versions:
+
+1. Deployed V1 to the course cluster.
+2. Performed a rolling update from V1 to V2.
+3. Used `kubectl rollout history` to inspect deployment revisions.
+4. Rolled back from V2 to V1 using `kubectl rollout undo`.
+5. Restored V2 using the Deployment manifest.
+
+Both versions were successfully deployed and verified. The final deployment runs V2.
+
+The quota-aware rolling update strategy uses `maxSurge: 0` and `maxUnavailable: 1` to avoid exceeding the namespace memory request quota.
+
 ### Local Environment
 
 - Kubernetes distribution: Kind
