@@ -302,6 +302,15 @@ The `k8s/` directory contains:
 - `deployment.yaml`: Defines the application deployment, SHA-tagged container image, resource requests and limits, and startup, readiness and liveness probes.
 - `service.yaml`: Exposes the application internally through a ClusterIP service on port 8000.
 
+### Container Security
+
+The Kubernetes Deployment applies container security settings:
+
+- Runs as a non-root user (UID 1000).
+- Disables privilege escalation.
+- Drops all Linux capabilities.
+- Uses the `RuntimeDefault` seccomp profile.
+
 ### Local Deployment
 
 The Saldes churn API has been deployed to the local Kind cluster.
@@ -309,6 +318,34 @@ The Saldes churn API has been deployed to the local Kind cluster.
 The Docker image was built locally, tagged with a Git commit SHA and loaded into the Kind cluster.
 
 The application pod reached `Running` and `Ready` status.
+
+### Model Versioning
+
+Two Logistic Regression model configurations were trained and evaluated:
+
+| Metric | V1 | V2 |
+|---|---:|---:|
+| Regularization parameter (C) | 1.0 | 0.5 |
+| ROC AUC | 0.788671 | 0.788777 |
+| Accuracy | 0.824 | 0.826 |
+| Minimum ROC AUC threshold | 0.74 | 0.74 |
+
+Both model versions passed the quality gate. Each Docker image was tagged with its corresponding Git commit SHA.
+
+### Rolling Update and Rollback
+
+The deployment uses Kubernetes RollingUpdate.
+
+Two model versions were deployed and verified:
+
+- V1: `127e522b9eff3446de983cf0d6ed0806f7e4b159`
+- V2: `b2a5e93f86034b2547c6abbe842262cf78720afa`
+
+The update from V1 to V2 completed successfully. The V2 model was tested through the Kubernetes Service using `POST /predict`.
+
+A rollback to V1 was performed using `kubectl rollout undo`. The previous model version was restored successfully and verified through the `/health` endpoint.
+
+V2 was subsequently restored as the active deployment.
 
 ### CI Validation
 
@@ -340,8 +377,14 @@ ci-cd-pipeline/
 │   ├── fastapi_prediction_prompt.png
 │   ├── fastapi_prediction_response.png
 │   ├── mlflow_ci_run.png
-│   └── mlflow_registry_champion.png
-├── outputs/
+│   ├── mlflow_registry_champion.png
+│   └── deployment-evidence/
+│        ├── 01-kind-v2-deployment.jpg
+│        ├── 02-kind-predict-success.jpg
+│        ├── 03-kind-rollout-history.jpg
+│        ├── 04-kind-rollback-v1.jpg
+│        └── 05-kind-final-v2.jpg
+├── outputs/                                # Generated locally and in CI; gitignored
 │   ├── model.joblib
 │   ├── metrics.json
 │   └── call_list.csv
@@ -365,6 +408,7 @@ ci-cd-pipeline/
 │   └── test_tracking.py
 ├── create_issues.py
 ├── issues_followup.json
+├── issues_miniproject.json
 ├── issues.json
 ├── .dockerignore
 ├── .gitignore
