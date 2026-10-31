@@ -6,6 +6,11 @@ metadata:
     app: saldes-churn
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app: saldes-churn
@@ -17,9 +22,11 @@ spec:
       securityContext:
         seccompProfile:
           type: RuntimeDefault
+      imagePullSecrets:
+        - name: ghcr-pull
       containers:
         - name: saldes-churn
-          image: saldes-churn:b2a5e93f86034b2547c6abbe842262cf78720afa
+          image: ghcr.io/lajoyan/ci-cd-pipeline/churn-api:b2a5e93f86034b2547c6abbe842262cf78720afa
           imagePullPolicy: IfNotPresent
 
           securityContext:
