@@ -448,6 +448,37 @@ GitHub Actions includes a dedicated Kubernetes manifest validation job using Kub
 
 Changes to files in `k8s/` trigger manifest validation independently of the application testing and model training pipeline.
 
+### GitHub Actions Deployment and Production Approval
+
+The CI/CD workflow includes a deployment job for the course Kubernetes cluster.
+
+**Deployment conditions:**
+
+- Deployment is restricted to the `main` branch.
+- The workflow must run in the personal repository `LAjoyan/ci-cd-pipeline`.
+- The Docker image must be built and published successfully before deployment.
+- Kubernetes manifest validation must pass or be skipped when no Kubernetes files have changed.
+- The deployment can be triggered by a push to `main` or manually using `workflow_dispatch`.
+
+**Deployment process:**
+
+1. GitHub Actions configures `kubectl` to access the course cluster.
+2. The kubeconfig is retrieved from the GitHub Environment secret `COURSE_KUBECONFIG`.
+3. The deployment manifest is updated with the Docker image tagged with the current Git commit SHA.
+4. The Deployment and Service manifests are applied to the `lilit-ajoyan` namespace.
+5. GitHub Actions waits for the Kubernetes rollout to complete.
+6. The workflow checks the deployed Pods and Services.
+
+**Production approval:**
+
+The deployment job uses the GitHub Environment `production`.
+
+A required reviewer must approve the deployment before the job can continue. This provides a manual approval gate between successful CI checks and deployment to the course cluster.
+
+The kubeconfig is stored as an environment secret and is not committed to the repository.
+
+After approval, GitHub Actions continues with the deployment and verifies the rollout.
+
 ## 📁 Project Structure
 
 ```text
