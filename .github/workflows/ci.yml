@@ -256,15 +256,16 @@ jobs:
           path: outputs/
 
       - name: Build Docker image
+        id: docker_image
         run: |
           IMAGE_NAME="ghcr.io/${{ github.repository }}/churn-api"
           IMAGE_NAME=$(echo "$IMAGE_NAME" | tr '[:upper:]' '[:lower:]')
-          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+          echo "name=$IMAGE_NAME" >> "$GITHUB_OUTPUT"
           docker build -t "$IMAGE_NAME:${{ github.sha }}" -t "$IMAGE_NAME:latest" .
 
       - name: Run container for smoke test
         run: |
-          docker run -d --name churn-test-service -p 8000:8000 "${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          docker run -d --name churn-test-service -p 8000:8000 "${{ steps.docker_image.outputs.name }}:${{ github.sha }}"
 
       - name: Run container smoke test
         run: |
@@ -304,8 +305,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ env.IMAGE_NAME }}:${{ github.sha }}
-            ${{ env.IMAGE_NAME }}:latest
+            ${{ steps.docker_image.outputs.name }}:${{ github.sha }}
+            ${{ steps.docker_image.outputs.name }}:latest
 
   deploy:
     name: Deploy to Course Kubernetes Cluster
