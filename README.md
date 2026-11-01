@@ -22,10 +22,8 @@ This project uses `uv` for lightning-fast dependency management. To set up your 
 #Example run command
 uv run pytest
 
-uv run python src/churn/some_script.py
+uv run python -m churn.model
 ```
-
-
 ## FastAPI
 
 The API predicts customer churn using the trained model.
@@ -47,7 +45,6 @@ Run API tests:
 uv run pytest tests/test_api.py
 ```
 
-
 ## ✅ Data Validation
 
 The data is validated against a Pandera schema (`validation/schema.py`) in CI. To run it locally:
@@ -67,8 +64,12 @@ In CI, the `validate` job checks both data files in parallel:
 
 - `kundbas.csv` must **pass**.
 - `kundbas_ny_leverans.csv` must **fail**. It is a known-bad delivery that proves the schema catches errors.
+- `kundbas_drift_leverans.csv` must pass schema validation but fail the drift check.
 
-The validation output is shown in the job summary on GitHub. The model is only trained if both checks are green.
+The validation job verifies that valid data passes schema validation and known-invalid data is rejected. These checks run before model training.
+The `train` job depends on both `test` and `validate` through
+`needs: [test, validate]`. This ensures that model training only
+starts when both jobs have succeeded.
 
 ## 📊 Classification Threshold Analysis
 
@@ -107,6 +108,7 @@ Comparing precision, recall, and F1-score helps the team understand these trade-
 The results from different thresholds should be reviewed before selecting a final threshold. For a more rigorous evaluation, select the threshold using validation data and reserve the test data for the final evaluation.
 
 **Note:** Classification thresholds determine how predicted probabilities are converted into churn predictions. They are different from the minimum ROC AUC threshold used by CI to decide whether model evaluation passes or fails.
+
 ## 📊 Model Threshold Analysis
 
 The pipeline needs a minimum ROC AUC for the model to pass CI. To choose that
@@ -175,6 +177,34 @@ Motivation:
 
 The threshold should be revisited if the data, features or model change significantly. In that case, rerun `analysis/seed_variance.py`.
 
+### Model Regression Gate
+
+In addition to the absolute ROC AUC quality threshold, the pipeline
+compares each candidate model against an approved baseline to detect
+unacceptable performance regressions.
+
+The comparison is implemented in `src/churn/regression_gate.py`.
+The candidate metrics are read from `outputs/metrics.json`, while
+the reference metrics are stored in `config/model_baseline.json`.
+
+The current baseline is the seed-42 reference model with a ROC AUC
+of 0.789. The maximum permitted decrease is 0.020, giving a minimum
+acceptable ROC AUC of 0.769 for the regression check.
+
+The regression tolerance is a project-specific policy informed by
+the seed-variance analysis. It is not a universal threshold for ML
+models and should be reviewed if the baseline or data changes.
+
+The pipeline applies the existing absolute quality threshold first,
+then runs the regression gate. The model is versioned and passed to
+downstream packaging only if both checks succeed.
+
+Automated tests cover candidates that pass, candidates that exceed
+the permitted regression, and missing or invalid metrics.
+
+The baseline should only be updated deliberately after a candidate
+model has been evaluated and approved.
+
 ## 📦 Model Versioning & Lineage
 
 Every model that passes the CI quality gate is versioned as a traceable artifact linked to the exact code commit and dataset that produced it.
@@ -198,6 +228,25 @@ Every model that passes the CI quality gate is versioned as a traceable artifact
    ```bash
    uv run pytest tests/test_model.py
    ```
+
+### Model Artifact Integrity
+
+The pipeline verifies the integrity of the trained model using SHA-256 checksums.
+
+After training, the pipeline saves the model as `outputs/model.joblib` and generates a corresponding `outputs/model.joblib.sha256` checksum file.
+
+Before the model is used, the checksum is verified at the following stages:
+
+- **Evaluation:** verifies the downloaded candidate model before evaluation.
+- **Docker packaging:** verifies the approved model artifact before building the image.
+- **Call-list generation:** verifies the model before scoring customers.
+- **API startup:** verifies the model before loading it into the FastAPI service.
+
+If the model is missing, its checksum is missing, or its contents no longer match the checksum, verification fails. The CI job stops, or the API rejects the model instead of loading it.
+
+Automated tests cover valid artifacts, modified model files, missing files and API behaviour when integrity verification fails.
+
+**Limitation:** This checksum mechanism detects changes when the saved checksum remains trustworthy. It does not independently authenticate the model and checksum if both are replaced.
 
 ## 🧪 Experiment Tracking & Model Registry (MLflow)
 
@@ -479,6 +528,30 @@ The kubeconfig is stored as an environment secret and is not committed to the re
 
 After approval, GitHub Actions continues with the deployment and verifies the rollout.
 
+### 🚀 Docker Optimization & Resource Management (VG)
+To improve operational reliability, container security, and CI resource utilization, the container deployment pipeline was upgraded:
+- **Multi-Stage Build:** Uses a `builder` stage for dependencies and creates a minimal `runtime` container without build tools (`/bin/uv`) or temporary caches.
+- **Optimized Production Environment:** Installs only production dependencies (`--frozen --no-dev --no-editable`) and strips `__pycache__` and test directories from `.venv`.
+- **Buildx GHA Layer Caching:** Integrates `type=gha` caching in CI to reuse unchanged layers across pipeline runs.
+- **Security & Health Monitoring:** Runs as a dedicated non-root `appuser` and defines a native container `HEALTHCHECK` against `GET /health`.
+
+#### Before and After Metrics
+| Metric | Baseline (Run #76, Single-Stage) | Optimized (Run #96, Multi-Stage + Cache) | Improvement |
+|---|---|---|---|
+| **Uncompressed Image Size** | ~620 MB (measured one-off baseline) | **~378 MB** (runtime-only, no `uv` or caches) | **~39% smaller** (~242 MB saved) |
+| **Build Duration** | 16s (measured one-off baseline) | **11.3s** (cold build) | **~30% faster** |
+| **Image Cleanliness** | Included build tools (`uv`) & caches | Stripped `.venv`, runtime-only | Minimal attack surface |
+| **Security** | Root user, no healthcheck | `appuser` (non-root) + container `HEALTHCHECK` | Least privilege, orchestration-ready |
+
+## 🛡️ Statistical Data Drift & Safe Data Delivery (VG)
+
+To protect the model from retraining on skewed or incomplete data deliveries that still pass static Pandera schema rules, `src/churn/drift.py` compares incoming deliveries against `data/kundbas.csv`:
+- **Volume Sanity Check:** Fails if row count drops below 50% of the reference dataset.
+- **Numeric Feature Drift (`MAX_MEAN_SHIFT_STD = 0.50`):** Fails if any raw numeric feature mean shifts by more than 0.50 standard deviations.
+- **Unseen Categories:** Fails if new categories appear in `region` or `abonnemang`.
+- **Target Rate Drift (`MAX_TARGET_DIFF = 0.15`):** Fails if the churn rate (`avslutat`) shifts by more than 15 percentage points.
+- **CI & Local Usage:** Runs in the `validate` job before `train` on `data/kundbas.csv` (expected: pass) and `data/kundbas_drift_leverans.csv` (passes Pandera schema, expected to fail drift check via `uv run python -m churn.drift data/kundbas_drift_leverans.csv data/kundbas.csv`) and is tested via `uv run python -m pytest tests/test_data.py`.
+
 ## 📁 Project Structure
 
 ```text
@@ -494,9 +567,12 @@ ci-cd-pipeline/
 │   └── service.yaml
 ├── analysis/
 │   └── seed_variance.py
+├── config/
+│   └── model_baseline.json
 ├── data/
 │   ├── kundbas.csv
-│   └── kundbas_ny_leverans.csv
+│   ├── kundbas_ny_leverans.csv
+│   └── kundbas_drift_leverans.csv
 ├── validation/
 │   └── schema.py
 ├── docs/
@@ -508,22 +584,28 @@ ci-cd-pipeline/
 ├── outputs/                                # Generated locally and in CI; gitignored
 │   ├── model.joblib
 │   ├── metrics.json
+│   ├── model.joblib.sha256
 │   └── call_list.csv
 ├── src/
 │   └── churn/
 │         ├── __init__.py
 │         ├── api.py
+│         ├── artifact_integrity.py
 │         ├── data.py
+│         ├── drift.py
 │         ├── evaluate.py
 │         ├── model.py
+│         ├── regression_gate.py
 │         ├── register.py
 │         ├── score.py
 │         └── tracking.py
 ├── tests/
 │   ├── smoke_test.py
+│   ├── test_artifact_integrity.py
 │   ├── test_api.py
 │   ├── test_data.py
 │   ├── test_features.py
+│   ├── test_regression_gate.py
 │   ├── test_model.py
 │   ├── test_register.py
 │   └── test_tracking.py
