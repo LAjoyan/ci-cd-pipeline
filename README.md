@@ -9,7 +9,7 @@ This project uses `uv` for lightning-fast dependency management. To set up your 
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/LeoLindqvist123/ci-cd-pipeline.git
+   git clone https://github.com/LAjoyan/ci-cd-pipeline.git
    cd ci-cd-pipeline
    ```
 2. Sync the environment and install all dependencies (including dev, data and MLflow tracking tools):
@@ -331,12 +331,207 @@ docker rm -f churn-test-service
 In `.github/workflows/ci.yml`, the `package` job runs after `evaluate`:
 1. Downloads the approved `model-<sha>` artifact.
 2. Builds the Docker image and runs `tests/smoke_test.py` against the live container.
-3. On `push` events to `main`, pushes the verified image to `ghcr.io/leolindqvist123/ci-cd-pipeline/churn-api` tagged with both `<commit-sha>` and `latest`.
+3. On successful pushes to `main` or manually triggered workflow runs on `main`, publishes the verified Docker image to GitHub Container Registry (GHCR), using the repository owner and name together with the `commit SHA` as the image tag. The image is also tagged as `latest`.
+
+## ☸️ Individual Mini-Project – Kubernetes Deployment
+
+This section documents the individual deployment of the Saldes churn prediction service to Kubernetes.
+
+### Course Cluster Deployment
+
+The Saldes Churn API was also deployed to the shared course Kubernetes cluster in a dedicated namespace.
+
+**Deployment configuration:**
+- Namespace: `lilit-ajoyan`
+- Container registry: GitHub Container Registry (GHCR)
+- Image: `ghcr.io/lajoyan/ci-cd-pipeline/churn-api`
+- Image version: Git commit SHA `b2a5e93`
+- Image platforms: `linux/amd64` and `linux/arm64`
+- Image access: Private GHCR package using a Kubernetes `imagePullSecret` (`ghcr-pull`).
+
+**Resource and deployment configuration:**
+
+The namespace has a limited memory quota. To avoid exceeding the quota during updates, the Deployment uses:
+
+- `maxSurge: 0`
+- `maxUnavailable: 1`
+
+This allows the existing Pod to be removed before its replacement is created. It may cause temporary downtime during updates.
+
+Pod security settings, resource requests and limits, and health probes are maintained in the Kubernetes Deployment manifest.
+
+**Deployment and verification:**
+
+The Deployment and Service were applied to the course namespace:
+
+```bash
+kubectl apply -n lilit-ajoyan -f k8s/deployment.yaml
+kubectl apply -n lilit-ajoyan -f k8s/service.yaml
+```
+**Deployment verification:**
+
+The deployment was successfully verified in the course cluster:
+
+- Pod status: `1/1 Running`
+- Service: Available on port `8000`
+- Health endpoint: HTTP `200 OK`
+- Prediction endpoint: HTTP `200 OK`
+
+Example prediction response:
+
+```json
+{
+  "prediction": 0,
+  "churn_probability": 0.358131
+}
+```
+Deployment screenshots are available in docs/deployment-evidence/.
+
+**Rolling update and rollback verification:**
+
+The deployment was tested using two model versions:
+
+1. Deployed V1 to the course cluster.
+2. Performed a rolling update from V1 to V2.
+3. Used `kubectl rollout history` to inspect deployment revisions.
+4. Rolled back from V2 to V1 using `kubectl rollout undo`.
+5. Restored V2 using the Deployment manifest.
+
+Both versions were successfully deployed and verified. The final deployment runs V2.
+
+The quota-aware rolling update strategy uses `maxSurge: 0` and `maxUnavailable: 1` to avoid exceeding the namespace memory request quota.
+
+### Operations and Drift Strategy
+
+The following describes the proposed operational approach. Automated data drift monitoring and alerting are not currently implemented.
+
+**Monitoring:**
+
+- Monitor Pod readiness, restarts and resource usage using Kubernetes.
+- Use the `/health` endpoint and Kubernetes probes to check application health.
+- Monitor API errors and prediction availability.
+
+**Model Performance Monitoring:**
+
+- Evaluate model performance using ROC AUC, precision, recall and F1-score.
+- Compare new model versions against the current approved model.
+- Keep the minimum ROC AUC threshold at 0.74.
+- Block model promotion when a candidate fails the quality threshold.
+
+**Data Drift Detection:**
+
+- Validate incoming data using Pandera.
+- Compare incoming feature distributions with the training data.
+- Investigate changes in data distributions and schema violations.
+
+**Response Plan:**
+
+1. Alert when data validation or model evaluation fails.
+2. Investigate unexpected changes in incoming data.
+3. Retrain the model using validated data when appropriate.
+4. Evaluate the new candidate before deployment.
+5. Roll back to the previous SHA-tagged image if the new model performs poorly.
+
+### Local Environment
+
+- Kubernetes distribution: Kind
+- Cluster name: `saldes-local`
+- Kubernetes version: `v1.37.0`
+- Container runtime: Docker Desktop
+
+### Kubernetes Manifests
+
+The `k8s/` directory contains:
+
+- `deployment.yaml`: Defines the application deployment, SHA-tagged container image, resource requests and limits, and startup, readiness and liveness probes.
+- `service.yaml`: Exposes the application internally through a ClusterIP service on port 8000.
+
+### Container Security
+
+The Kubernetes Deployment applies container security settings:
+
+- Runs as a non-root user (UID 1000).
+- Disables privilege escalation.
+- Drops all Linux capabilities.
+- Uses the `RuntimeDefault` seccomp profile.
+
+### Local Deployment
+
+The Saldes churn API has been deployed to the local Kind cluster.
+
+The Docker image was built locally, tagged with a Git commit SHA and loaded into the Kind cluster.
+
+The application pod reached `Running` and `Ready` status.
+
+### Model Versioning
+
+Two Logistic Regression model configurations were trained and evaluated:
+
+| Metric | V1 | V2 |
+|---|---:|---:|
+| Regularization parameter (C) | 1.0 | 0.5 |
+| ROC AUC | 0.788671 | 0.788777 |
+| Accuracy | 0.824 | 0.826 |
+| Minimum ROC AUC threshold | 0.74 | 0.74 |
+
+Both model versions passed the quality gate. Each Docker image was tagged with its corresponding Git commit SHA.
+
+### Rolling Update and Rollback
+
+The deployment uses Kubernetes RollingUpdate.
+
+Two model versions were deployed and verified:
+
+- V1: `127e522b9eff3446de983cf0d6ed0806f7e4b159`
+- V2: `b2a5e93f86034b2547c6abbe842262cf78720afa`
+
+The update from V1 to V2 completed successfully. The V2 model was tested through the Kubernetes Service using `POST /predict`.
+
+A rollback to V1 was performed using `kubectl rollout undo`. The previous model version was restored successfully and verified through the `/health` endpoint.
+
+V2 was subsequently restored as the active deployment.
+
+### CI Validation
+
+GitHub Actions includes a dedicated Kubernetes manifest validation job using Kubeconform.
+
+Changes to files in `k8s/` trigger manifest validation independently of the application testing and model training pipeline.
+
+### GitHub Actions Deployment and Production Approval
+
+The CI/CD workflow includes a deployment job for the course Kubernetes cluster.
+
+**Deployment conditions:**
+
+- Deployment is restricted to the `main` branch.
+- The workflow must run in the personal repository `LAjoyan/ci-cd-pipeline`.
+- The Docker image must be built and published successfully before deployment.
+- Kubernetes manifest validation must pass or be skipped when no Kubernetes files have changed.
+- The deployment can be triggered by a push to `main` or manually using `workflow_dispatch`.
+
+**Deployment process:**
+
+1. GitHub Actions configures `kubectl` to access the course cluster.
+2. The kubeconfig is retrieved from the GitHub Environment secret `COURSE_KUBECONFIG`.
+3. The deployment manifest is updated with the Docker image tagged with the current Git commit SHA.
+4. The Deployment and Service manifests are applied to the `lilit-ajoyan` namespace.
+5. GitHub Actions waits for the Kubernetes rollout to complete.
+6. The workflow checks the deployed Pods and Services.
+
+**Production approval:**
+
+The deployment job uses the GitHub Environment `production`.
+
+A required reviewer must approve the deployment before the job can continue. This provides a manual approval gate between successful CI checks and deployment to the course cluster.
+
+The kubeconfig is stored as an environment secret and is not committed to the repository.
+
+After approval, GitHub Actions continues with the deployment and verifies the rollout.
 
 ### 🚀 Docker Optimization & Resource Management (VG)
 To improve operational reliability, container security, and CI resource utilization, the container deployment pipeline was upgraded:
 - **Multi-Stage Build:** Uses a `builder` stage for dependencies and creates a minimal `runtime` container without build tools (`/bin/uv`) or temporary caches.
-- **Optimized Production Environment:** Installs only production dependencies (`--frozen --no-dev --no-editable`) and strips `__pycache__` and test directories from `.venv`.
+- **Optimized Production Environment:** Installs only production dependencies (`--frozen --no-dev --no-install-project`) and strips `__pycache__` and test directories from `.venv`.
 - **Buildx GHA Layer Caching:** Integrates `type=gha` caching in CI to reuse unchanged layers across pipeline runs.
 - **Security & Health Monitoring:** Runs as a dedicated non-root `appuser` and defines a native container `HEALTHCHECK` against `GET /health`.
 
@@ -367,6 +562,9 @@ ci-cd-pipeline/
 │   │       └── action.yml
 │   └── workflows/
 │       └── ci.yml
+├── k8s/
+│   ├── deployment.yaml
+│   └── service.yaml
 ├── analysis/
 │   └── seed_variance.py
 ├── config/
@@ -381,8 +579,9 @@ ci-cd-pipeline/
 │   ├── fastapi_prediction_prompt.png
 │   ├── fastapi_prediction_response.png
 │   ├── mlflow_ci_run.png
-│   └── mlflow_registry_champion.png
-├── outputs/
+│   ├── mlflow_registry_champion.png
+│   └── deployment-evidence/
+├── outputs/                                # Generated locally and in CI; gitignored
 │   ├── model.joblib
 │   ├── metrics.json
 │   ├── model.joblib.sha256
@@ -412,6 +611,7 @@ ci-cd-pipeline/
 │   └── test_tracking.py
 ├── create_issues.py
 ├── issues_followup.json
+├── issues_miniproject.json
 ├── issues.json
 ├── .dockerignore
 ├── .gitignore
@@ -473,3 +673,18 @@ This project is collaboratively developed by:
 * [Erfan Tahmasebi](https://github.com/erfantk25-lab)
 * [Leo Lindqvist Kröhnert](https://github.com/LeoLindqvist123)
 * [Josefin Lesley](https://github.com/Josefin3647)
+
+### AI Assistance
+
+ChatGPT was used as a learning and support tool during development.
+
+It helped with:
+- Understanding Docker, Kubernetes and MLOps concepts.
+- Troubleshooting technical issues.
+- Reviewing selected CI/CD and Kubernetes configurations.
+- Discussing implementation approaches.
+- Improving README documentation and wording.
+
+I reviewed the suggestions, made the implementation decisions, and verified changes through code reviews, automated tests and actual deployments.
+
+AI assistance did not replace my responsibility for understanding and verifying the project.

@@ -1,0 +1,97 @@
+[
+  {
+    "title": "Set up an isolated local Kind cluster for the mini-project",
+    "body": "## Work completed\nCreated a dedicated Kind cluster named `saldes-local` and stored its kubeconfig separately from the course cluster configuration.\n\n## Evidence\n- Kind cluster: `saldes-local`\n- Context: `kind-saldes-local`\n- Node reached `Ready` status.\n\n**Status:** Completed. Close this issue after confirming the evidence is saved.",
+    "labels": "chore,code"
+  },
+  {
+    "title": "Add Kubernetes Deployment and Service manifests",
+    "body": "## Work completed\nAdded `k8s/deployment.yaml` and `k8s/service.yaml` for the Saldes churn API. The Deployment uses a commit-SHA-tagged image, resource requests and limits, and startup, readiness, and liveness probes against `/health`. The Service exposes port 8000 internally using `ClusterIP`.\n\n## Acceptance criteria\n- [x] Deployment and Service manifests exist in `k8s/`.\n- [x] Image tag uses a commit SHA rather than `latest`.\n- [x] Resource requests and limits are defined.\n- [x] Probes call `/health`.\n\n**Status:** Completed. Close this issue after confirming the evidence is saved.",
+    "labels": "feature,code"
+  },
+  {
+    "title": "Build and load SHA-tagged Saldes Docker images into Kind",
+    "body": "## Work completed\nGenerated the model artifacts locally, built the Saldes Docker image, tagged model versions with their corresponding Git commit SHAs, and loaded the images into the `saldes-local` Kind cluster.\n\n## Evidence\n- V1 image: `saldes-churn:127e522b9eff3446de983cf0d6ed0806f7e4b159`\n- V2 image: `saldes-churn:b2a5e93f86034b2547c6abbe842262cf78720afa`\n\n**Status:** Completed for local Kind. Publishing the image to GHCR is tracked separately.",
+    "labels": "feature,code"
+  },
+  {
+    "title": "Add Kubeconform validation for Kubernetes manifests in CI",
+    "body": "## Work completed\nUpdated `.github/workflows/ci.yml` to detect changes under `k8s/` separately and added a Kubeconform validation job. Included that job in the final CI status check.\n\n## Acceptance criteria\n- [x] Changes under `k8s/**` are detected by their own path filter.\n- [x] Kubernetes manifests are validated with Kubeconform.\n- [x] The final CI status job includes Kubernetes validation.\n\n**Status:** Completed. CI ran successfully on the feature branch.",
+    "labels": "ci,code"
+  },
+  {
+    "title": "Harden the Kubernetes Pod and container security contexts",
+    "body": "## Work completed\nAdded Pod and container security settings to `k8s/deployment.yaml`. The Pod uses the `RuntimeDefault` seccomp profile. The container runs as the non-root UID 1000, disallows privilege escalation, and drops all Linux capabilities.\n\n## Acceptance criteria\n- [x] `runAsNonRoot: true` and `runAsUser: 1000` are configured.\n- [x] `allowPrivilegeEscalation: false` is configured.\n- [x] All capabilities are dropped.\n- [x] Pod seccomp profile is `RuntimeDefault`.\n\n**Status:** Completed in the local Kind manifest. Verify the same settings are suitable for the course cluster during cloud deployment.",
+    "labels": "chore,code"
+  },
+  {
+    "title": "Deploy the Saldes API to local Kind and verify its health endpoint",
+    "body": "## Work completed\nDeployed the Saldes churn API to the `saldes-local` Kind cluster and verified that the Pod became Ready. Tested `GET /health` through port-forwarding to the Kubernetes Service and received HTTP 200 with `model_loaded: true`.\n\n## Acceptance criteria\n- [x] Deployment completes successfully.\n- [x] Pod reaches `1/1 Running`.\n- [x] Service routes traffic to the API.\n- [x] `/health` returns HTTP 200 and confirms the model is loaded.\n\n**Status:** Completed for local Kind.",
+    "labels": "feature,code"
+  },
+  {
+    "title": "Verify churn predictions through the local Kubernetes Service",
+    "body": "## Work completed\nSent a JSON request to `POST /predict` through the Kubernetes Service using port-forwarding. The live model returned HTTP 200 with a prediction and churn probability.\n\n## Evidence\nExample response: `prediction: 0`, `churn_probability: 0.358131`.\n\n**Status:** Completed for local Kind. The response is from the real deployed model, not the fake model used in unit tests.",
+    "labels": "feature,code"
+  },
+  {
+    "title": "Train and evaluate model V2 with commit and data lineage",
+    "body": "## Work completed\nChanged the Logistic Regression regularization parameter from its default `C=1.0` to `C=0.5`, retrained the model, and evaluated it with the existing quality gate. Recorded the V2 Git commit SHA and dataset SHA-256 in `outputs/metrics.json`.\n\n## Results\n- V1 ROC AUC: approximately `0.788671`.\n- V2 ROC AUC: approximately `0.788777`.\n- Required ROC AUC: `0.74`.\n- V2 commit: `b2a5e93f86034b2547c6abbe842262cf78720afa`.\n- Dataset: `kundbas.csv`.\n\nThe measured ROC AUC change is very small; this change is used to demonstrate a new model version and deployment lifecycle, not to claim a meaningful quality improvement.\n\n**Status:** Completed; V2 passed the quality gate.",
+    "labels": "feature,code"
+  },
+  {
+    "title": "Demonstrate a rolling update from model V1 to V2 in Kind",
+    "body": "## Work completed\nLoaded the V2 Docker image into Kind, updated the Deployment image from V1 to the V2 commit-SHA tag, and verified that the rollout completed successfully. The V2 Pod reached `1/1 Running` with zero restarts.\n\n## Acceptance criteria\n- [x] V2 image is available in Kind.\n- [x] Deployment references the V2 SHA tag.\n- [x] `kubectl rollout status` reports success.\n- [x] New Pod is Ready.\n\n**Status:** Completed. Evidence should be saved with the mini-project deployment screenshots.",
+    "labels": "feature,code"
+  },
+  {
+    "title": "Record Kubernetes rollout history for model V1 and V2",
+    "body": "## Work completed\nInspected the Deployment rollout history and verified the image associated with each retained revision. Revision 3 contained V1 and revision 4 contained V2 before the rollback demonstration.\n\n## Evidence\n- Revision 3: `saldes-churn:127e522b9eff3446de983cf0d6ed0806f7e4b159` (V1).\n- Revision 4: `saldes-churn:b2a5e93f86034b2547c6abbe842262cf78720afa` (V2).\n\n**Status:** Completed. Save the `kubectl rollout history` output or screenshot.",
+    "labels": "chore,docs"
+  },
+  {
+    "title": "Demonstrate rollback from model V2 to V1 in Kind",
+    "body": "## Work completed\nUsed `kubectl rollout undo deployment/saldes-churn --to-revision=3` to roll back from V2 to V1. Verified that the rollout completed, the Pod became Ready, the Deployment referenced the V1 SHA-tagged image, and `/health` returned HTTP 200 with `model_loaded: true`.\n\n## Evidence\n- Rollback command and successful rollout output.\n- Running Pod and V1 image reference.\n- Successful health response after restarting port-forwarding.\n\n**Status:** Completed. Save the rollback terminal output or screenshot.",
+    "labels": "feature,code"
+  },
+  {
+    "title": "Restore model V2 as the final local Kind deployment",
+    "body": "## Work completed\nRe-applied `k8s/deployment.yaml` after the rollback to restore V2 and the current security settings. Verified a successful rollout, a `1/1 Running` Pod, and the V2 commit-SHA image reference.\n\n**Status:** Completed. V2 is the final version currently intended to run in local Kind.",
+    "labels": "feature,code"
+  },
+  {
+    "title": "Publish the verified SHA-tagged Saldes image to GHCR",
+    "body": "## Goal\nPublish the approved V2 Docker image to GitHub Container Registry so that the course Kubernetes cluster can pull it.\n\n## Acceptance criteria\n- [ ] Build or use the verified V2 image.\n- [ ] Tag it under the personal fork's GHCR image path.\n- [ ] Authenticate to GHCR using an appropriate GitHub Actions token or other secure method.\n- [ ] Push the commit-SHA tag.\n- [ ] Verify that the image can be pulled by the course cluster.\n\nDo not commit registry credentials or personal access tokens. The local Kind image is not automatically available to the course cluster.\n\n**Status:** Planned.",
+    "labels": "ci,code"
+  },
+  {
+    "title": "Deploy the Saldes API to the course Kubernetes cluster",
+    "body": "## Goal\nDeploy the Saldes API to the Kubernetes cluster provided for the course, using the assigned personal namespace and the dedicated course kubeconfig.\n\n## Acceptance criteria\n- [ ] Confirm the active context and assigned namespace before applying resources.\n- [ ] Use an image accessible from the course cluster, such as the verified GHCR image.\n- [ ] Configure resource requests and limits to fit the namespace quota.\n- [ ] Deploy the Deployment and Service.\n- [ ] Verify the Pod becomes Ready.\n\nCheck existing namespace resources and quota before deploying. Do not delete shared or course resources unless they are confirmed to be yours and no longer needed.\n\n**Status:** Planned.",
+    "labels": "feature,code"
+  },
+  {
+    "title": "Verify health and predictions through the course-cluster Service",
+    "body": "## Goal\nVerify the deployed Saldes API in the course cluster by calling `/health` and `/predict` through its Kubernetes Service.\n\n## Acceptance criteria\n- [ ] `/health` returns HTTP 200 and `model_loaded: true`.\n- [ ] `/predict` accepts the documented English API fields and returns a prediction and churn probability.\n- [ ] Capture terminal output or screenshots from the course cluster.\n\n**Status:** Planned; depends on successful course-cluster deployment.",
+    "labels": "feature,code"
+  },
+  {
+    "title": "Add a Kubernetes deployment job to GitHub Actions",
+    "body": "## Goal\nExtend the personal fork's GitHub Actions workflow with a deployment job that deploys the verified SHA-tagged image to Kubernetes.\n\n## Acceptance criteria\n- [ ] Deployment job runs only for pushes to `main`.\n- [ ] Deployment uses the verified image tagged with the commit SHA, not `latest`.\n- [ ] Kubernetes credentials are stored securely as GitHub secrets or environment secrets.\n- [ ] Deployment waits for rollout completion and reports failures.\n- [ ] Existing test, data validation, model evaluation, image packaging, and manifest validation jobs remain intact.\n\n**Status:** Planned.",
+    "labels": "ci,code"
+  },
+  {
+    "title": "Require approval before production Kubernetes deployment",
+    "body": "## Goal\nProtect the production deployment job with a GitHub Actions Environment that requires approval before deployment proceeds.\n\n## Acceptance criteria\n- [ ] Configure a production environment in the personal fork.\n- [ ] Require an authorized reviewer or approver before production deployment.\n- [ ] Ensure the deployment job references that environment.\n- [ ] Verify that the job waits for approval and proceeds after approval.\n\n**Status:** Planned.",
+    "labels": "ci,code"
+  },
+  {
+    "title": "Document the operations plan for model quality and data drift",
+    "body": "## Goal\nDocument how the deployed churn service would be monitored and how the team would respond to model degradation or changes in incoming data.\n\n## Acceptance criteria\n- [ ] Describe API and Kubernetes health monitoring.\n- [ ] Explain how to detect model performance degradation.\n- [ ] Explain how to detect changes in data distributions or schema.\n- [ ] Define when to alert, investigate, retrain, or reject a candidate model.\n- [ ] Define when and how to roll back to a previous model version.\n\n**Status:** Planned.",
+    "labels": "chore,docs"
+  },
+  {
+    "title": "Complete mini-project README and collect deployment evidence",
+    "body": "## Goal\nComplete the individual mini-project documentation and collect evidence required for the demonstration and submission.\n\n## Acceptance criteria\n- [ ] Document local Kind deployment.\n- [ ] Document course-cluster deployment.\n- [ ] Document the selected rollout strategy and rollback commands.\n- [ ] Document the GitHub Actions deployment and production approval.\n- [ ] Include the operations plan.\n- [ ] Save evidence for both environments, including a version update and rollback.\n- [ ] Record how AI was used in the work.\n\n**Status:** In progress; local Kind documentation and evidence have started.",
+    "labels": "chore,docs"
+  }
+]

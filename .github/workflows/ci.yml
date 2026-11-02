@@ -2,7 +2,12 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - "feat/**"
+    paths-ignore:
+      - "**.md"
+
   pull_request:
     branches: [main]
   schedule:
@@ -19,6 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.filter.outputs.code }}
+      k8s: ${{ steps.filter.outputs.k8s }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -35,10 +41,28 @@ jobs:
               - "tests/**"
               - "validation/**"
               - "pyproject.toml"
+              - "uv.lock"
               - "Dockerfile"
               - ".dockerignore"
               - ".github/workflows/**"
               - ".github/actions/**"
+            k8s:
+              - "k8s/**"
+
+  validate-k8s:
+    name: Validate Kubernetes Manifests
+    needs: changes
+    if: needs.changes.outputs.k8s == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Validate manifests with Kubeconform
+        uses: docker://ghcr.io/yannh/kubeconform:v0.8.0
+        with:
+          entrypoint: /kubeconform
+          args: "-strict -summary k8s/"
 
   test:
     name: Lint and Test
@@ -257,7 +281,6 @@ jobs:
           name: model-${{ github.sha }}
           path: outputs/
 
-
       - name: Verify approved model integrity
         run: uv run python -m churn.artifact_integrity outputs/model.joblib
 
@@ -265,10 +288,11 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build Docker image with layer caching
+        id: docker_image
         run: |
           IMAGE_NAME="ghcr.io/${{ github.repository }}/churn-api"
           IMAGE_NAME=$(echo "$IMAGE_NAME" | tr '[:upper:]' '[:lower:]')
-          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+          echo "name=$IMAGE_NAME" >> "$GITHUB_OUTPUT"
 
           START_TIME=$(date +%s)
           docker buildx build \
@@ -282,7 +306,7 @@ jobs:
           BUILD_SECONDS=$((END_TIME - START_TIME))
 
           IMAGE_SIZE_BYTES=$(docker image inspect "$IMAGE_NAME:${{ github.sha }}" --format='{{.Size}}')
-          IMAGE_SIZE_MB=$(python3 -c "print(f'{$IMAGE_SIZE_BYTES / (1024 * 1024):.2f}')")
+          IMAGE_SIZE_MB=$(awk "BEGIN {printf \"%.2f\", $IMAGE_SIZE_BYTES / 1048576}")
 
           {
             echo "## 🐳 Docker Optimization Metrics (VG Evaluation)"
@@ -295,7 +319,7 @@ jobs:
 
       - name: Run container for smoke test
         run: |
-          docker run -d --name churn-test-service -p 8000:8000 "${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          docker run -d --name churn-test-service -p 8000:8000 "${{ steps.docker_image.outputs.name }}:${{ github.sha }}"
 
       - name: Run container smoke test
         run: |
@@ -311,23 +335,122 @@ jobs:
         run: |
           docker rm -f churn-test-service || true
 
+      - name: Set up QEMU
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        uses: docker/setup-qemu-action@v4
+
       - name: Log in to GitHub Container Registry
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push Docker image to GHCR (main branch only)
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      - name: Build and push multi-platform Docker image
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: |
+            ${{ steps.docker_image.outputs.name }}:${{ github.sha }}
+            ${{ steps.docker_image.outputs.name }}:latest
+
+  deploy:
+    name: Deploy to Course Kubernetes Cluster
+    needs: [package, validate-k8s]
+    if: >-
+      !cancelled() &&
+      github.repository == 'LAjoyan/ci-cd-pipeline' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      needs.package.result == 'success' &&
+      (needs.validate-k8s.result == 'success' || needs.validate-k8s.result == 'skipped')
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    permissions:
+      contents: read
+    env:
+      K8S_NAMESPACE: lilit-ajoyan
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: latest
+
+      - name: Configure course cluster access
+        env:
+          COURSE_KUBECONFIG: ${{ secrets.COURSE_KUBECONFIG }}
         run: |
-          docker push "${{ env.IMAGE_NAME }}:${{ github.sha }}"
-          docker push "${{ env.IMAGE_NAME }}:latest"
+          set -euo pipefail
+
+          if [ -z "$COURSE_KUBECONFIG" ]; then
+            echo "::error::COURSE_KUBECONFIG secret is missing"
+            exit 1
+          fi
+
+          KUBECONFIG_PATH="$RUNNER_TEMP/course-kubeconfig"
+          printf '%s' "$COURSE_KUBECONFIG" > "$KUBECONFIG_PATH"
+          chmod 600 "$KUBECONFIG_PATH"
+          echo "KUBECONFIG=$KUBECONFIG_PATH" >> "$GITHUB_ENV"
+
+      - name: Verify cluster access
+        run: |
+          kubectl get deployment saldes-churn \
+            --namespace "$K8S_NAMESPACE"
+
+      - name: Deploy application
+        run: |
+          set -euo pipefail
+
+          IMAGE_NAME=$(echo "ghcr.io/${GITHUB_REPOSITORY}/churn-api" | tr '[:upper:]' '[:lower:]')
+          IMAGE="${IMAGE_NAME}:${GITHUB_SHA}"
+
+          echo "Deploying image: ${IMAGE}"
+
+          IMAGE_COUNT=$(grep -Ec '^[[:space:]]*image:' k8s/deployment.yaml)
+          if [ "$IMAGE_COUNT" -ne 1 ]; then
+            echo "::error::Expected exactly one container image in deployment.yaml"
+            exit 1
+          fi
+
+          sed -E "s|^([[:space:]]*image:).*|\1${IMAGE}|" \
+            k8s/deployment.yaml > "$RUNNER_TEMP/deployment.yaml"
+
+          kubectl apply --namespace "$K8S_NAMESPACE" \
+            -f "$RUNNER_TEMP/deployment.yaml"
+
+          kubectl apply --namespace "$K8S_NAMESPACE" \
+            -f k8s/service.yaml
+
+      - name: Verify deployment rollout
+        run: |
+          set -euo pipefail
+
+          kubectl rollout status deployment/saldes-churn \
+            --namespace "$K8S_NAMESPACE" \
+            --timeout=180s
+
+          kubectl get pods,svc --namespace "$K8S_NAMESPACE"
+
+          echo "Deployment completed successfully."
+
+      - name: Remove temporary kubeconfig
+        if: always()
+        run: rm -f "$RUNNER_TEMP/course-kubeconfig"
 
   ci-complete:
     name: CI Status Check
-    needs: [changes, test, validate, train, evaluate, package]
+    needs: [changes, validate-k8s, test, validate, train, evaluate, package, deploy]
     if: always()
     runs-on: ubuntu-latest
     steps:
