@@ -331,7 +331,7 @@ docker rm -f churn-test-service
 In `.github/workflows/ci.yml`, the `package` job runs after `evaluate`:
 1. Downloads the approved `model-<sha>` artifact.
 2. Builds the Docker image and runs `tests/smoke_test.py` against the live container.
-3. On successful `push` events to `main`, publishes the verified Docker image to GitHub Container Registry (GHCR), using the repository owner and name together with the commit SHA as the image tag. The image is also tagged as `latest`.
+3. On successful pushes to `main` or manually triggered workflow runs on `main`, publishes the verified Docker image to GitHub Container Registry (GHCR), using the repository owner and name together with the `commit SHA` as the image tag. The image is also tagged as `latest`.
 
 ## ☸️ Individual Mini-Project – Kubernetes Deployment
 
@@ -531,7 +531,7 @@ After approval, GitHub Actions continues with the deployment and verifies the ro
 ### 🚀 Docker Optimization & Resource Management (VG)
 To improve operational reliability, container security, and CI resource utilization, the container deployment pipeline was upgraded:
 - **Multi-Stage Build:** Uses a `builder` stage for dependencies and creates a minimal `runtime` container without build tools (`/bin/uv`) or temporary caches.
-- **Optimized Production Environment:** Installs only production dependencies (`--frozen --no-dev --no-editable`) and strips `__pycache__` and test directories from `.venv`.
+- **Optimized Production Environment:** Installs only production dependencies (`--frozen --no-dev --no-install-project`) and strips `__pycache__` and test directories from `.venv`.
 - **Buildx GHA Layer Caching:** Integrates `type=gha` caching in CI to reuse unchanged layers across pipeline runs.
 - **Security & Health Monitoring:** Runs as a dedicated non-root `appuser` and defines a native container `HEALTHCHECK` against `GET /health`.
 
