@@ -423,7 +423,7 @@ jobs:
             exit 1
           fi
 
-          sed -E "s|^([[:space:]]*image:).*|\1${IMAGE}|" \
+          sed -E "s|^([[:space:]]*image:).*|\1 ${IMAGE}|" \
             k8s/deployment.yaml > "$RUNNER_TEMP/deployment.yaml"
 
           kubectl apply --namespace "$K8S_NAMESPACE" \
