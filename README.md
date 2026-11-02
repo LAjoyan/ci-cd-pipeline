@@ -673,3 +673,18 @@ This project is collaboratively developed by:
 * [Erfan Tahmasebi](https://github.com/erfantk25-lab)
 * [Leo Lindqvist Kröhnert](https://github.com/LeoLindqvist123)
 * [Josefin Lesley](https://github.com/Josefin3647)
+
+### AI Assistance
+
+ChatGPT was used as a learning and support tool during development.
+
+It helped with:
+- Understanding Docker, Kubernetes and MLOps concepts.
+- Troubleshooting technical issues.
+- Reviewing selected CI/CD and Kubernetes configurations.
+- Discussing implementation approaches.
+- Improving README documentation and wording.
+
+I reviewed the suggestions, made the implementation decisions, and verified changes through code reviews, automated tests and actual deployments.
+
+AI assistance did not replace my responsibility for understanding and verifying the project.
